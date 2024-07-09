@@ -3,18 +3,39 @@ use rp2040_hal::{
     pac::I2C1,
 };
 
+#[cfg(feature = "ledmatrix")]
 use crate::fl16::LedMatrix;
+#[cfg(feature = "ledmatrix")]
 use crate::led_hal as bsp;
+#[cfg(feature = "ledmatrix")]
 use crate::mapping::*;
+#[cfg(feature = "ledmatrix")]
 use crate::matrix::*;
+
+#[cfg(feature = "sevensegment")]
+use crate::ssd::*;
+#[cfg(feature = "sevensegment")]
+use crate::ssd_hal as bsp;
+#[cfg(feature = "sevensegment")]
+use is31fl3729::devices::SevenSegment;
 
 /// Bytes needed to represent all LEDs with a single bit
 /// math.ceil(WIDTH * HEIGHT / 8)
+#[cfg(feature = "ledmatrix")]
 pub const DRAW_BYTES: usize = 39;
+#[cfg(feature = "sevensegment")]
+pub const DRAW_BYTES: usize = 9;
 
 /// Maximum number of brightneses levels
 pub const BRIGHTNESS_LEVELS: u8 = 255;
 
+/// Flip the X axis for drawing
+#[cfg(feature = "ledmatrix")]
+pub const FLIP_X_AXIS_FOR_DRAW: bool = true;
+#[cfg(not(feature = "ledmatrix"))]
+pub const FLIP_X_AXIS_FOR_DRAW: bool = false;
+
+#[cfg(feature = "ledmatrix")]
 pub type Foo = LedMatrix<
     bsp::hal::I2C<
         I2C1,
@@ -24,6 +45,19 @@ pub type Foo = LedMatrix<
         ),
     >,
 >;
+
+#[cfg(feature = "sevensegment")]
+pub type Foo = SevenSegment<
+    bsp::hal::I2C<
+        I2C1,
+        (
+            bsp::hal::gpio::Pin<Gpio26, bsp::hal::gpio::Function<bsp::hal::gpio::I2C>>,
+            bsp::hal::gpio::Pin<Gpio27, bsp::hal::gpio::Function<bsp::hal::gpio::I2C>>,
+        ),
+    >,
+>;
+#[cfg(feature = "sevensegment")]
+pub type LedmatrixState = SevenSegmentState;
 
 pub fn draw(bytes: &[u8; DRAW_BYTES]) -> Grid {
     let mut grid = Grid::default();
@@ -38,7 +72,11 @@ pub fn draw(bytes: &[u8; DRAW_BYTES]) -> Grid {
             } else {
                 0x00
             };
-            grid.0[8 - x][y] = val;
+            if FLIP_X_AXIS_FOR_DRAW {
+                grid.0[(WIDTH - 1) - x][y] = val;
+            } else {
+                grid.0[x][y] = val;
+            }
         }
     }
 
@@ -46,10 +84,16 @@ pub fn draw(bytes: &[u8; DRAW_BYTES]) -> Grid {
 }
 
 pub fn draw_grey_col(grid: &mut Grid, col: u8, levels: &[u8; HEIGHT]) {
+    let c = if FLIP_X_AXIS_FOR_DRAW {
+        (WIDTH - 1) - col as usize
+    } else {
+        col as usize
+    };
     // TODO: I don't think I need the [..HEIGHT] slicing
-    grid.0[8 - col as usize][..HEIGHT].copy_from_slice(&levels[..HEIGHT]);
+    grid.0[c][..HEIGHT].copy_from_slice(&levels[..HEIGHT]);
 }
 
+#[cfg(feature = "ledmatrix")]
 pub fn display_sleep_reason(sleep_reason: SleepReason) -> Grid {
     let mut grid = Grid::default();
 
@@ -81,6 +125,29 @@ pub fn display_sleep_reason(sleep_reason: SleepReason) -> Grid {
     grid
 }
 
+#[cfg(feature = "sevensegment")]
+pub fn display_sleep_reason(sleep_reason: SleepReason) -> Grid {
+    let mut grid = Grid::default();
+
+    match sleep_reason {
+        SleepReason::Command => {
+            display_string(0, &mut grid, "COMMAND");
+        }
+        SleepReason::SleepPin => {
+            display_string(0, &mut grid, "SLEEP pin");
+        }
+        SleepReason::Timeout => {
+            display_string(0, &mut grid, "T . OUT");
+        }
+        SleepReason::UsbSuspend => {
+            display_string(0, &mut grid, "USB");
+        }
+    };
+
+    grid
+}
+
+#[cfg(feature = "ledmatrix")]
 pub fn display_sleep() -> Grid {
     Grid([
         [
@@ -131,6 +198,14 @@ pub fn display_sleep() -> Grid {
     ])
 }
 
+#[cfg(feature = "sevensegment")]
+pub fn display_sleep() -> Grid {
+    let mut grid = Grid::default();
+    display_string(0, &mut grid, "SLEEP .");
+    grid
+}
+
+#[cfg(feature = "ledmatrix")]
 pub fn display_panic() -> Grid {
     Grid([
         [
@@ -181,6 +256,14 @@ pub fn display_panic() -> Grid {
     ])
 }
 
+#[cfg(feature = "sevensegment")]
+pub fn display_panic() -> Grid {
+    let mut grid = Grid::default();
+    display_string(0, &mut grid, "PANIC!");
+    grid
+}
+
+#[cfg(feature = "ledmatrix")]
 pub fn display_lotus() -> Grid {
     let mut grid = Grid::default();
 
@@ -193,6 +276,14 @@ pub fn display_lotus() -> Grid {
     grid
 }
 
+#[cfg(feature = "sevensegment")]
+pub fn display_lotus() -> Grid {
+    let mut grid = Grid::default();
+    display_string(0, &mut grid, "LOTUS");
+    grid
+}
+
+#[cfg(feature = "ledmatrix")]
 pub fn display_lotus2() -> Grid {
     Grid([
         [
@@ -243,6 +334,14 @@ pub fn display_lotus2() -> Grid {
     ])
 }
 
+#[cfg(feature = "sevensegment")]
+pub fn display_lotus2() -> Grid {
+    let mut grid = Grid::default();
+    display_string(0, &mut grid, "L  O  TUS");
+    grid
+}
+
+#[cfg(feature = "ledmatrix")]
 pub fn display_letter(pos: usize, grid: &mut Grid, letter: SingleDisplayData) {
     let letter_size = 8;
     for x in 0..letter_size {
@@ -255,7 +354,10 @@ pub fn display_letter(pos: usize, grid: &mut Grid, letter: SingleDisplayData) {
 
 /// Gradient getting brighter from top to bottom
 pub fn gradient() -> Grid {
+    #[cfg(feature = "ledmatrix")]
     let gradient_drop = 1; // Brightness drop between rows
+    #[cfg(feature = "sevensegment")]
+    let gradient_drop = 28; // Brightness drop between digits
     let mut grid = Grid::default();
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
@@ -290,7 +392,10 @@ pub fn rows(n: usize) -> Grid {
 
 /// Double sided gradient, bright in the middle, dim top and bottom
 pub fn double_gradient() -> Grid {
+    #[cfg(feature = "ledmatrix")]
     let gradient_drop = 1; // Brightness drop between rows
+    #[cfg(feature = "sevensegment")]
+    let gradient_drop = 28; // Brightness drop between rows
     let mut grid = Grid::default();
     for y in 0..(HEIGHT / 2) {
         for x in 0..WIDTH {
@@ -299,7 +404,7 @@ pub fn double_gradient() -> Grid {
     }
     for y in (HEIGHT / 2)..HEIGHT {
         for x in 0..WIDTH {
-            grid.0[x][y] = (HEIGHT - gradient_drop * (y + 1)) as u8;
+            grid.0[x][y] = (gradient_drop * (HEIGHT - (y + 1))) as u8;
         }
     }
     grid
@@ -321,6 +426,7 @@ pub fn set_brightness(state: &mut LedmatrixState, brightness: u8, matrix: &mut F
 }
 
 /// Just sends two I2C commands for the entire grid
+#[cfg(feature = "ledmatrix")]
 pub fn fill_grid_pixels(state: &LedmatrixState, matrix: &mut Foo) {
     // 0xB4 LEDs on the first page, 0xAB on the second page
     let mut brightnesses = [0x00; 0xB4 + 0xAB];
@@ -335,6 +441,22 @@ pub fn fill_grid_pixels(state: &LedmatrixState, matrix: &mut Foo) {
     matrix.device.fill_matrix(&brightnesses).unwrap();
 }
 
+/// Just sends two I2C commands for the entire grid
+#[cfg(feature = "sevensegment")]
+pub fn fill_grid_pixels(state: &SevenSegmentState, matrix: &mut Foo) {
+    // 0x8F leds in the controller
+    let mut brightnesses = [0x00; 0x8F];
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            let register = (matrix.device.calc_pixel)(x as u8, y as u8);
+            brightnesses[register as usize] = ((state.grid.0[x][y] as u64)
+                * (state.brightness as u64)
+                / (BRIGHTNESS_LEVELS as u64)) as u8;
+        }
+    }
+    matrix.device.fill_matrix(&brightnesses).unwrap();
+}
+
 pub fn full_brightness(matrix: &mut Foo) {
     // Fills every pixel individually
     //matrix.fill_brightness(0xFF).unwrap();
@@ -343,6 +465,21 @@ pub fn full_brightness(matrix: &mut Foo) {
     matrix.device.fill(0xFF).unwrap();
 }
 
+#[cfg(feature = "sevensegment")]
+pub fn spin(time: usize, len: usize) -> Grid {
+    let mut grid = Grid::default();
+    let start = time % 6;
+    // limit length to 5
+    let l = if len > 5 { 5 } else { len };
+    for i in 0..l {
+        for y in 0..HEIGHT {
+            grid.0[(start + i) % 6][y] = 0xFF;
+        }
+    }
+    grid
+}
+
+#[cfg(feature = "ledmatrix")]
 pub fn zigzag() -> Grid {
     let mut grid = Grid::default();
 
@@ -368,6 +505,13 @@ pub fn zigzag() -> Grid {
     // Finish it off nicely
     grid.0[1][33] = 0xFF;
 
+    grid
+}
+
+#[cfg(feature = "sevensegment")]
+pub fn zigzag() -> Grid {
+    let mut grid = Grid::default();
+    display_string(0, &mut grid, "///\\\\\\///");
     grid
 }
 

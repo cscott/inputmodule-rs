@@ -12,11 +12,14 @@ use crate::b1display::{B1Pattern, Fps, PowerMode};
 use crate::c1minimal::Color;
 use crate::font::{convert_font, convert_symbol};
 use crate::ledmatrix::{Game, GameOfLifeStartParam, Pattern};
+use crate::sevensegment::Color as SSColor;
+use crate::sevensegment::Pattern as SSPattern;
 
 const FWK_MAGIC: &[u8] = &[0x32, 0xAC];
 pub const FRAMEWORK_VID: u16 = 0x32AC;
 pub const LED_MATRIX_PID: u16 = 0x0020;
 pub const B1_LCD_PID: u16 = 0x0021;
+pub const SEVEN_SEGMENT_PID: u16 = 0x0023;
 
 type Brightness = u8;
 
@@ -33,7 +36,7 @@ enum Command {
     DisplayBwImage = 0x06,
     SendCol = 0x07,
     CommitCols = 0x08,
-    _B1Reserved = 0x09,
+    SetText = 0x09,
     StartGame = 0x10,
     GameControl = 0x11,
     _GameStatus = 0x12,
@@ -85,7 +88,7 @@ fn match_serialdevs(
             vec![pid]
         } else {
             // By default accept any type
-            vec![LED_MATRIX_PID, B1_LCD_PID, 0x22, 0xFF]
+            vec![LED_MATRIX_PID, B1_LCD_PID, SEVEN_SEGMENT_PID, 0x22, 0xFF]
         };
         // Find all supported Framework devices
         for p in ports {
@@ -190,7 +193,7 @@ pub fn serial_commands(args: &crate::ClapCli) {
                     pattern_cmd(serialdev, pattern);
                 }
                 if ledmatrix_args.all_brightnesses {
-                    all_brightnesses_cmd(serialdev);
+                    all_brightnesses_cmd(serialdev, false);
                 }
                 if ledmatrix_args.panic {
                     simple_cmd(serialdev, Command::Panic, &[0x00]);
@@ -259,7 +262,74 @@ pub fn serial_commands(args: &crate::ClapCli) {
             }
 
             if ledmatrix_args.clock {
-                clock_cmd(&serialdevs);
+                clock_cmd(&serialdevs, false);
+            }
+        }
+        Some(crate::Commands::SevenSegment(sevensegment_args)) => {
+            for serialdev in &serialdevs {
+                if args.verbose {
+                    println!("Selected serialdev: {:?}", serialdev);
+                }
+
+                if sevensegment_args.bootloader {
+                    bootloader_cmd(serialdev);
+                }
+                if let Some(sleeping_arg) = sevensegment_args.sleeping {
+                    sleeping_cmd(serialdev, sleeping_arg);
+                }
+                if let Some(brightness_arg) = sevensegment_args.brightness {
+                    brightness_cmd(serialdev, brightness_arg);
+                }
+                if let Some(percentage) = sevensegment_args.percentage {
+                    assert!(percentage <= 100);
+                    percentage_cmd(serialdev, percentage);
+                }
+                if let Some(animate_arg) = sevensegment_args.animate {
+                    animate_cmd(serialdev, animate_arg);
+                }
+                if let Some(pattern) = sevensegment_args.pattern {
+                    ss_pattern_cmd(serialdev, pattern);
+                }
+                if sevensegment_args.all_brightnesses {
+                    all_brightnesses_cmd(serialdev, true);
+                }
+                if sevensegment_args.panic {
+                    simple_cmd(serialdev, Command::Panic, &[0x00]);
+                }
+
+                if let Some(s) = &sevensegment_args.string {
+                    ss_show_string(serialdev, s);
+                }
+
+                if let Some(color) = sevensegment_args.set_color {
+                    ss_set_color_cmd(serialdev, color);
+                }
+
+                if let Some(fps) = sevensegment_args.animation_fps {
+                    animation_fps_cmd(serialdev, fps);
+                }
+
+                if let Some(freq) = sevensegment_args.pwm_freq {
+                    pwm_freq_cmd(serialdev, freq);
+                }
+                if let Some(debug_mode) = sevensegment_args.debug_mode {
+                    debug_mode_cmd(serialdev, debug_mode);
+                }
+
+                if sevensegment_args.version {
+                    get_device_version(serialdev);
+                }
+            }
+            // Commands that block and need manual looping
+            if sevensegment_args.blinking {
+                blinking_cmd(&serialdevs);
+            }
+            if sevensegment_args.breathing {
+                breathing_cmd(&serialdevs);
+            }
+
+            if sevensegment_args.clock {
+                clock_cmd(&serialdevs, true);
             }
         }
         Some(crate::Commands::B1Display(b1display_args)) => {
@@ -375,6 +445,10 @@ fn percentage_cmd(serialdev: &str, arg: u8) {
 }
 
 fn pattern_cmd(serialdev: &str, arg: Pattern) {
+    simple_cmd(serialdev, Command::Pattern, &[arg as u8]);
+}
+
+fn ss_pattern_cmd(serialdev: &str, arg: SSPattern) {
     simple_cmd(serialdev, Command::Pattern, &[arg as u8]);
 }
 
@@ -526,21 +600,23 @@ fn commit_cols(port: &mut Box<dyn SerialPort>) {
 
 ///Increase the brightness with each pixel.
 ///Only 0-255 available, so it can't fill all 306 LEDs
-fn all_brightnesses_cmd(serialdev: &str) {
+fn all_brightnesses_cmd(serialdev: &str, ss: bool) {
     let mut port = serialport::new(serialdev, 115_200)
         .timeout(SERIAL_TIMEOUT)
         .open()
         .expect("Failed to open port");
+    let width: usize = if ss { 8 } else { WIDTH };
+    let height: usize = if ss { 9 } else { HEIGHT };
 
-    for x in 0..WIDTH {
+    for x in 0..width {
         let mut vals: [u8; HEIGHT] = [0; HEIGHT];
 
-        for y in 0..HEIGHT {
-            let brightness = x + WIDTH * y;
+        for y in 0..height {
+            let brightness = (x + width * y) * (if ss { 3 } else { 1 });
             vals[y] = if brightness > 255 { 0 } else { brightness } as u8;
         }
 
-        send_col(&mut port, x as u8, &vals);
+        send_col(&mut port, x as u8, &vals[..height]);
     }
     commit_cols(&mut port);
 }
@@ -797,17 +873,35 @@ fn render_matrix(serialdev: &str, matrix: &[[u8; 34]; 9]) {
 
 /// Render the current time and display.
 /// Loops forever, updating every second
-fn clock_cmd(serialdevs: &Vec<String>) {
+fn clock_cmd(serialdevs: &Vec<String>, ss: bool) {
     loop {
         let date = Local::now();
         let current_time = date.format("%H:%M").to_string();
         println!("Current Time = {current_time}");
 
         for serialdev in serialdevs {
-            show_string(serialdev, &current_time);
+            if ss {
+                ss_show_string(serialdev, &current_time);
+            } else {
+                show_string(serialdev, &current_time);
+            }
         }
         thread::sleep(Duration::from_millis(1000));
     }
+}
+
+/// Render a string with up to 18 (!) letters (63 bytes)
+fn ss_show_string(serialdev: &str, s: &str) {
+    const MAX_STR_LEN: usize = 64 - 4; // total buffer size can't exceed 64
+    let len = if s.len() <= MAX_STR_LEN {
+        s.len()
+    } else {
+        MAX_STR_LEN
+    };
+    let mut buf = [0 as u8; MAX_STR_LEN + 1];
+    buf[0] = len as u8;
+    buf[1..=len].copy_from_slice(&s.as_bytes()[..len]);
+    simple_cmd(serialdev, Command::SetText, &buf[0..=len]);
 }
 
 /// Render a string with up to five letters
@@ -1057,6 +1151,20 @@ fn set_color_cmd(serialdev: &str, color: Color) {
         Color::Yellow => &[0xFF, 0xFF, 0x00],
         Color::Cyan => &[0x00, 0xFF, 0xFF],
         Color::Purple => &[0xFF, 0x00, 0xFF],
+    };
+    simple_cmd(serialdev, Command::SetColor, args);
+}
+
+fn ss_set_color_cmd(serialdev: &str, color: SSColor) {
+    let args = match color {
+        SSColor::White => &[0xFF, 0xFF, 0xFF],
+        SSColor::Black => &[0x00, 0x00, 0x00],
+        SSColor::Red => &[0xFF, 0x00, 0x00],
+        SSColor::Green => &[0x00, 0xFF, 0x00],
+        SSColor::Blue => &[0x00, 0x00, 0xFF],
+        SSColor::Yellow => &[0xFF, 0xFF, 0x00],
+        SSColor::Cyan => &[0x00, 0xFF, 0xFF],
+        SSColor::Purple => &[0xFF, 0x00, 0xFF],
     };
     simple_cmd(serialdev, Command::SetColor, args);
 }

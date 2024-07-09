@@ -33,6 +33,9 @@ num-traits = { version = "0.2", default-features = false }
 # LED Matrix
 is31fl3741 = { workspace = true, optional = true }
 
+# Seven Segment Display
+is31fl3729 = { workspace = true, optional = true }
+
 # B1 Display
 st7306 = { workspace = true, optional = true }
 embedded-graphics = { workspace = true, optional = true }
@@ -45,6 +48,7 @@ ws2812-pio = { workspace = true, optional = true }
 [features]
 default = []
 ledmatrix = ["is31fl3741"]
+sevensegment = ["is31fl3729", "smart-leds", "ws2812-pio"]
 b1display = ["st7306", "embedded-graphics", "tinybmp"]
 c1minimal = ["smart-leds", "ws2812-pio"]
 qtpy = ["c1minimal"]

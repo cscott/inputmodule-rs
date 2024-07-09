@@ -10,6 +10,7 @@ on:
       - 'c1minimal/**'
       - 'fl16-inputmodules/**'
       - 'ledmatrix/**'
+      - 'sevensegment/**'
   pull_request:
     branches:
       - '*'
@@ -18,6 +19,7 @@ on:
       - 'c1minimal/**'
       - 'fl16-inputmodules/**'
       - 'ledmatrix/**'
+      - 'sevensegment/**'
 
 env:
   CARGO_TERM_COLOR: always

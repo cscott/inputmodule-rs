@@ -37,6 +37,7 @@ jobs:
       - run: cargo make --cwd c1minimal
       - run: cargo make --cwd ledmatrix
       - run: cargo make --cwd qtpy
+      - run: cargo make --cwd sevensegment
       # Release version
       - run: cargo make --cwd ledmatrix build-release
       - run: cargo make --cwd ledmatrix build-release-10k
@@ -44,6 +45,7 @@ jobs:
       - run: cargo make --cwd b1display build-release
       - run: cargo make --cwd c1minimal build-release
       - run: cargo make --cwd qtpy build-release
+      - run: cargo make --cwd sevensegment build-release
 
       - name: Convert to UF2 format
         run: |
@@ -55,6 +57,7 @@ jobs:
             cargo make --cwd ledmatrix build-release-10k-uf2
             cargo make --cwd ledmatrix build-release-evt-uf2
             cargo make --cwd ledmatrix uf2
+            cargo make --cwd sevensegment uf2
 
       - name: Convert to bin format
         run: |
@@ -64,6 +67,7 @@ jobs:
             cargo make --cwd qtpy bin
             cargo make --cwd c1minimal bin
             cargo make --cwd ledmatrix bin
+            cargo make --cwd sevensegment bin
 
       - name: Upload ledmatrix files
         uses: actions/upload-artifact@v3
@@ -94,6 +98,14 @@ jobs:
             target/thumbv6m-none-eabi/release/c1minimal.bin
             target/thumbv6m-none-eabi/release/c1minimal.uf2
 
+      - name: Upload sevensegment files
+        uses: actions/upload-artifact@v3
+        with:
+          name: sevensegment_fw_${{github.sha}}
+          path: |
+            target/thumbv6m-none-eabi/release/sevensegment.bin
+            target/thumbv6m-none-eabi/release/sevensegment.uf2
+
   linting:
     name: Linting
     runs-on: ubuntu-latest
@@ -112,6 +124,7 @@ jobs:
           cargo make clippy --cwd qtpy
           cargo make clippy --cwd c1minimal
           cargo make clippy --cwd ledmatrix
+          cargo make clippy --cwd sevensegment
 
       # fl16-inputmodules/src/serialnum.rs
       # is currently used by all firmwares to show their firmware version.
@@ -124,6 +137,7 @@ jobs:
           cargo pkgid -p qtpy | cut -d "#" -f2 >> versions.tmp
           cargo pkgid -p c1minimal | cut -d "#" -f2 >> versions.tmp
           cargo pkgid -p ledmatrix | cut -d "#" -f2 >> versions.tmp
+          cargo pkgid -p sevensegment | cut -d "#" -f2 >> versions.tmp
           uniq -c versions.tmp | [ $(wc -l) -eq 1 ]
 
   formatting:
@@ -139,5 +153,6 @@ jobs:
           cargo fmt -p b1display -- --check
           cargo fmt -p c1minimal -- --check
           cargo fmt -p ledmatrix -- --check
+          cargo fmt -p sevensegment -- --check
           cargo fmt -p qtpy -- --check
           cargo fmt -p fl16-inputmodules -- --check

@@ -8,6 +8,7 @@ members = [
     "b1display",
     "c1minimal",
     "ledmatrix",
+    "sevensegment",
     "fl16-inputmodules",
     "inputmodule-control",
     "qtpy",
@@ -38,6 +39,8 @@ usbd-hid = "0.6.1"
 fugit = "0.3.7"
 # LED Matrix
 is31fl3741 = "0.3.0"
+# Seven Segment Display
+is31fl3729 = { version = "0.1.3", features = ["sevensegment"] }
 # B1 Display
 st7306 = { git = "https://github.com/FrameworkComputer/st7306-rs", branch = "update-deps" }
 embedded-graphics = "0.8"
@@ -47,6 +50,12 @@ smart-leds = "0.3.0"
 ws2812-pio = "0.6.0"
 
 [profile.dev.package.ledmatrix]
+codegen-units = 1
+incremental = true
+# To allow single-stepping through code use 0. Will cause timing issues, though
+opt-level = 3
+
+[profile.dev.package.sevensegment]
 codegen-units = 1
 incremental = true
 # To allow single-stepping through code use 0. Will cause timing issues, though

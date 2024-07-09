@@ -32,5 +32,14 @@ pub mod lcd_hal;
 #[cfg(all(feature = "c1minimal", not(feature = "qtpy")))]
 pub mod minimal_hal;
 
+#[cfg(feature = "sevensegment")]
+pub mod patterns;
+#[cfg(feature = "sevensegment")]
+pub mod ssd;
+#[cfg(feature = "sevensegment")]
+pub mod ssd_animations;
+#[cfg(feature = "sevensegment")]
+pub mod ssd_hal;
+
 pub mod control;
 pub mod serialnum;

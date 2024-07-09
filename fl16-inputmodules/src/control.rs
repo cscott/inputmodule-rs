@@ -38,8 +38,19 @@ use crate::patterns::*;
 #[cfg(feature = "ledmatrix")]
 use is31fl3741::PwmFreq;
 
-#[cfg(feature = "c1minimal")]
+#[cfg(any(feature = "c1minimal", feature = "sevensegment"))]
 use smart_leds::{SmartLedsWrite, RGB8};
+
+#[cfg(feature = "sevensegment")]
+use crate::patterns::*;
+#[cfg(feature = "sevensegment")]
+use crate::ssd::*;
+#[cfg(feature = "sevensegment")]
+use core::fmt::Write;
+#[cfg(feature = "sevensegment")]
+use heapless::String;
+#[cfg(feature = "sevensegment")]
+use is31fl3729::PwmFreq;
 
 #[repr(u8)]
 #[derive(num_derive::FromPrimitive)]
@@ -130,7 +141,7 @@ pub enum DisplayMode {
     Hpm = 0x01,
 }
 
-#[cfg(feature = "ledmatrix")]
+#[cfg(any(feature = "ledmatrix", feature = "sevensegment"))]
 #[derive(Copy, Clone, num_derive::FromPrimitive)]
 pub enum PwmFreqArg {
     /// 29kHz
@@ -150,6 +161,18 @@ impl From<PwmFreqArg> for PwmFreq {
             PwmFreqArg::P3k6 => PwmFreq::P3k6,
             PwmFreqArg::P1k8 => PwmFreq::P1k8,
             PwmFreqArg::P900 => PwmFreq::P900,
+        }
+    }
+}
+#[cfg(feature = "sevensegment")]
+impl From<PwmFreqArg> for PwmFreq {
+    fn from(val: PwmFreqArg) -> Self {
+        match val {
+            // use the closest match
+            PwmFreqArg::P29k => PwmFreq::P32k,
+            PwmFreqArg::P3k6 => PwmFreq::P4k,
+            PwmFreqArg::P1k8 => PwmFreq::P2k,
+            PwmFreqArg::P900 => PwmFreq::P1k,
         }
     }
 }
@@ -175,19 +198,19 @@ pub enum Command {
     /// Panic. Just to test what happens
     Panic,
     /// Draw black/white on the grid
-    #[cfg(feature = "ledmatrix")]
+    #[cfg(any(feature = "ledmatrix", feature = "sevensegment"))]
     Draw([u8; DRAW_BYTES]),
-    #[cfg(feature = "ledmatrix")]
+    #[cfg(any(feature = "ledmatrix", feature = "sevensegment"))]
     StageGreyCol(u8, [u8; HEIGHT]),
     DrawGreyColBuffer,
-    #[cfg(feature = "b1display")]
+    #[cfg(any(feature = "b1display", feature = "sevensegment"))]
     SetText(String<64>),
     StartGame(Game),
     GameControl(GameControlArg),
     GameStatus,
     Version,
     GetColor,
-    #[cfg(feature = "c1minimal")]
+    #[cfg(any(feature = "c1minimal", feature = "sevensegment"))]
     SetColor(RGB8),
     DisplayOn(bool),
     GetDisplayOn,
@@ -204,7 +227,7 @@ pub enum Command {
     GetPowerMode,
     SetAnimationPeriod(u16),
     GetAnimationPeriod,
-    #[cfg(feature = "ledmatrix")]
+    #[cfg(any(feature = "ledmatrix", feature = "sevensegment"))]
     SetPwmFreq(PwmFreqArg),
     GetPwmFreq,
     SetDebugMode(bool),
@@ -401,6 +424,116 @@ pub fn parse_module_command(count: usize, buf: &[u8]) -> Option<Command> {
     }
 }
 
+#[cfg(feature = "sevensegment")]
+pub fn parse_module_command(count: usize, buf: &[u8]) -> Option<Command> {
+    if count >= 3 && buf[0] == 0x32 && buf[1] == 0xAC {
+        let command = buf[2];
+        let arg = if count <= 3 { None } else { Some(buf[3]) };
+
+        match FromPrimitive::from_u8(command) {
+            Some(CommandVals::SetText) => {
+                if let Some(arg) = arg {
+                    let available_len = count - 4;
+                    let str_len = arg as usize;
+                    assert!(str_len <= available_len);
+
+                    assert!(str_len < 64);
+                    let mut bytes = [0; 64];
+                    bytes[..str_len].copy_from_slice(&buf[4..4 + str_len]);
+
+                    let text_str = core::str::from_utf8(&bytes[..str_len]).unwrap();
+                    let mut text: String<64> = String::new();
+                    writeln!(&mut text, "{}", text_str).unwrap();
+
+                    Some(Command::SetText(text))
+                } else {
+                    None
+                }
+            }
+            Some(CommandVals::Brightness) => Some(if let Some(brightness) = arg {
+                Command::SetBrightness(brightness)
+            } else {
+                Command::GetBrightness
+            }),
+            Some(CommandVals::Pattern) => match arg.and_then(FromPrimitive::from_u8) {
+                // TODO: Convert arg to PatternVals
+                Some(PatternVals::Percentage) => {
+                    if count >= 5 {
+                        Some(Command::Percentage(buf[4]))
+                    } else {
+                        None
+                    }
+                }
+                Some(PatternVals::Gradient) => Some(Command::Pattern(PatternVals::Gradient)),
+                Some(PatternVals::DoubleGradient) => {
+                    Some(Command::Pattern(PatternVals::DoubleGradient))
+                }
+                Some(PatternVals::DisplayLotus) => {
+                    Some(Command::Pattern(PatternVals::DisplayLotus))
+                }
+                Some(PatternVals::ZigZag) => Some(Command::Pattern(PatternVals::ZigZag)),
+                Some(PatternVals::FullBrightness) => {
+                    Some(Command::Pattern(PatternVals::FullBrightness))
+                }
+                Some(PatternVals::DisplayPanic) => {
+                    Some(Command::Pattern(PatternVals::DisplayPanic))
+                }
+                Some(PatternVals::DisplayLotus2) => {
+                    Some(Command::Pattern(PatternVals::DisplayLotus2))
+                }
+                None => None,
+            },
+            Some(CommandVals::Animate) => Some(if let Some(run_animation) = arg {
+                Command::SetAnimate(run_animation == 1)
+            } else {
+                Command::GetAnimate
+            }),
+            Some(CommandVals::Draw) => {
+                if count >= 3 + DRAW_BYTES {
+                    let mut bytes = [0; DRAW_BYTES];
+                    bytes.clone_from_slice(&buf[3..3 + DRAW_BYTES]);
+                    Some(Command::Draw(bytes))
+                } else {
+                    None
+                }
+            }
+            Some(CommandVals::StageGreyCol) => {
+                if count >= 3 + 1 + HEIGHT && (buf[3] as usize) < WIDTH {
+                    let mut bytes = [0; HEIGHT];
+                    bytes.clone_from_slice(&buf[4..4 + HEIGHT]);
+                    Some(Command::StageGreyCol(buf[3], bytes))
+                } else {
+                    None
+                }
+            }
+            Some(CommandVals::DrawGreyColBuffer) => Some(Command::DrawGreyColBuffer),
+            Some(CommandVals::AnimationPeriod) => {
+                if count == 3 + 2 {
+                    let period = u16::from_le_bytes([buf[3], buf[4]]);
+                    Some(Command::SetAnimationPeriod(period))
+                } else {
+                    Some(Command::GetAnimationPeriod)
+                }
+            }
+            Some(CommandVals::PwmFreq) => {
+                if let Some(freq) = arg {
+                    FromPrimitive::from_u8(freq).map(Command::SetPwmFreq)
+                } else {
+                    Some(Command::GetPwmFreq)
+                }
+            }
+            Some(CommandVals::DebugMode) => Some(if let Some(debug_mode) = arg {
+                Command::SetDebugMode(debug_mode == 1)
+            } else {
+                Command::GetDebugMode
+            }),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 #[cfg(feature = "b1display")]
 pub fn parse_module_command(count: usize, buf: &[u8]) -> Option<Command> {
     if count >= 3 && buf[0] == 0x32 && buf[1] == 0xAC {
@@ -483,7 +616,12 @@ pub fn parse_module_command(count: usize, buf: &[u8]) -> Option<Command> {
     }
 }
 
-#[cfg(not(any(feature = "ledmatrix", feature = "b1display", feature = "c1minimal")))]
+#[cfg(not(any(
+    feature = "ledmatrix",
+    feature = "sevensegment",
+    feature = "b1display",
+    feature = "c1minimal"
+)))]
 pub fn parse_module_command(_count: usize, _buf: &[u8]) -> Option<Command> {
     None
 }
@@ -631,6 +769,137 @@ pub fn handle_command(
             let mut response: [u8; 32] = [0; 32];
             response[0] = state.debug_mode as u8;
             Some(response)
+        }
+        _ => handle_generic_command(command),
+    }
+}
+
+#[cfg(feature = "sevensegment")]
+pub fn handle_command(
+    command: &Command,
+    state: &mut SevenSegmentState,
+    matrix: &mut Foo,
+    ws2812: &mut impl SmartLedsWrite<Color = RGB8, Error = ()>,
+    _random: u8,
+) -> Option<[u8; 32]> {
+    match command {
+        Command::SetText(text) => {
+            let mut grid = Grid::default();
+            display_string(0, &mut grid, text);
+            state.grid = grid;
+            None
+        }
+        Command::GetBrightness => {
+            let mut response: [u8; 32] = [0; 32];
+            response[0] = state.brightness;
+            Some(response)
+        }
+        Command::SetBrightness(br) => {
+            //let _ = serial.write("Brightness".as_bytes());
+            set_brightness(state, *br, matrix);
+            None
+        }
+        Command::Percentage(p) => {
+            //let p = if count >= 5 { buf[4] } else { 100 };
+            state.grid = percentage(*p as u16);
+            None
+        }
+        Command::Pattern(pattern) => {
+            //let _ = serial.write("Pattern".as_bytes());
+            match pattern {
+                PatternVals::Gradient => state.grid = gradient(),
+                PatternVals::DoubleGradient => state.grid = double_gradient(),
+                PatternVals::DisplayLotus => state.grid = display_lotus(),
+                PatternVals::ZigZag => state.grid = zigzag(),
+                PatternVals::FullBrightness => {
+                    state.grid = percentage(100);
+                    set_brightness(state, BRIGHTNESS_LEVELS, matrix);
+                }
+                PatternVals::DisplayPanic => state.grid = display_panic(),
+                PatternVals::DisplayLotus2 => state.grid = display_lotus2(),
+                _ => {}
+            }
+            None
+        }
+        Command::SetAnimate(a) => {
+            state.animate = *a;
+            None
+        }
+        Command::GetAnimate => {
+            let mut response: [u8; 32] = [0; 32];
+            response[0] = state.animate as u8;
+            Some(response)
+        }
+        Command::Draw(vals) => {
+            state.grid = draw(vals);
+            None
+        }
+        Command::StageGreyCol(col, vals) => {
+            draw_grey_col(&mut state.col_buffer, *col, vals);
+            None
+        }
+        Command::DrawGreyColBuffer => {
+            // Copy the staging buffer to the real grid and display it
+            state.grid = state.col_buffer.clone();
+            // Zero the old staging buffer, just for good measure.
+            state.col_buffer = percentage(0);
+            None
+        }
+        // TODO: Move to handle_generic_command
+        Command::IsSleeping => {
+            let mut response: [u8; 32] = [0; 32];
+            response[0] = match state.sleeping {
+                SleepState::Sleeping(_) => 1,
+                SleepState::Awake => 0,
+            };
+            Some(response)
+        }
+        Command::SetAnimationPeriod(period) => {
+            state.animation_period = (*period as u64) * 1_000;
+            None
+        }
+        Command::GetAnimationPeriod => {
+            // TODO: Doesn't seem to work when the FPS is 16 or higher
+            let mut response: [u8; 32] = [0; 32];
+            let period_ms = state.animation_period / 1_000;
+            response[0..2].copy_from_slice(&(period_ms as u16).to_le_bytes());
+            Some(response)
+        }
+        Command::SetPwmFreq(arg) => {
+            state.pwm_freq = *arg;
+            matrix.device.set_pwm_freq(state.pwm_freq.into()).unwrap();
+            None
+        }
+        Command::GetPwmFreq => {
+            let mut response: [u8; 32] = [0; 32];
+            response[0] = state.pwm_freq as u8;
+            Some(response)
+        }
+        Command::SetDebugMode(arg) => {
+            state.debug_mode = *arg;
+            None
+        }
+        Command::GetDebugMode => {
+            let mut response: [u8; 32] = [0; 32];
+            response[0] = state.debug_mode as u8;
+            Some(response)
+        }
+        Command::GetColor => {
+            let mut response: [u8; 32] = [0; 32];
+            response[0] = state.color.r;
+            response[1] = state.color.g;
+            response[2] = state.color.b;
+            Some(response)
+        }
+        Command::SetColor(color) => {
+            state.color = *color;
+            ws2812
+                .write(smart_leds::brightness(
+                    [*color].iter().cloned(),
+                    state.brightness,
+                ))
+                .unwrap();
+            None
         }
         _ => handle_generic_command(command),
     }
