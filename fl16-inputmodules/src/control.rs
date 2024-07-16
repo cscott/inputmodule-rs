@@ -210,8 +210,10 @@ pub enum Command {
     GameStatus,
     Version,
     GetColor,
-    #[cfg(any(feature = "c1minimal", feature = "sevensegment"))]
+    #[cfg(feature = "c1minimal")]
     SetColor(RGB8),
+    #[cfg(feature = "sevensegment")]
+    SetColor([RGB8; 5]),
     DisplayOn(bool),
     GetDisplayOn,
     InvertScreen(bool),
@@ -527,6 +529,23 @@ pub fn parse_module_command(count: usize, buf: &[u8]) -> Option<Command> {
             } else {
                 Command::GetDebugMode
             }),
+            Some(CommandVals::SetColor) => {
+                let mut colors = [RGB8::new(0,0,0); 5];
+                if count >= 6 {
+                    let mut arg = 0;
+                    for i in 0..5 {
+                        if 3 + 3*(arg+1) > count { arg = 0 }
+                        let (red, green, blue) = (buf[3+3*arg], buf[4+3*arg], buf[5+3*arg]);
+                        colors[i] = RGB8::new(red, green, blue);
+                        arg = arg + 1;
+                    }
+                    Some(Command::SetColor(colors))
+                } else if arg.is_none() {
+                    Some(Command::GetColor)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     } else {
@@ -797,6 +816,12 @@ pub fn handle_command(
         Command::SetBrightness(br) => {
             //let _ = serial.write("Brightness".as_bytes());
             set_brightness(state, *br, matrix);
+            ws2812
+                .write(smart_leds::brightness(
+                    state.color.iter().cloned(),
+                    state.brightness,
+                ))
+                .unwrap();
             None
         }
         Command::Percentage(p) => {
@@ -885,17 +910,18 @@ pub fn handle_command(
             Some(response)
         }
         Command::GetColor => {
+            // XXX
             let mut response: [u8; 32] = [0; 32];
-            response[0] = state.color.r;
-            response[1] = state.color.g;
-            response[2] = state.color.b;
+            response[0] = state.color[0].r;
+            response[1] = state.color[0].g;
+            response[2] = state.color[0].b;
             Some(response)
         }
         Command::SetColor(color) => {
             state.color = *color;
             ws2812
                 .write(smart_leds::brightness(
-                    [*color].iter().cloned(),
+                    state.color.iter().cloned(),
                     state.brightness,
                 ))
                 .unwrap();

@@ -79,7 +79,7 @@ pub struct SevenSegmentSubcommand {
     // TODO: Allow getting current state
     #[arg(long)]
     #[clap(value_enum)]
-    pub set_color: Option<Color>,
+    pub set_color: Vec<Color>,
 
     /// Set/get animation FPS
     #[arg(long)]

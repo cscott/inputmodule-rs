@@ -301,8 +301,8 @@ pub fn serial_commands(args: &crate::ClapCli) {
                     ss_show_string(serialdev, s);
                 }
 
-                if let Some(color) = sevensegment_args.set_color {
-                    ss_set_color_cmd(serialdev, color);
+                if sevensegment_args.set_color.len() > 0 {
+                    ss_set_color_cmd(serialdev, &sevensegment_args.set_color);
                 }
 
                 if let Some(fps) = sevensegment_args.animation_fps {
@@ -1155,18 +1155,22 @@ fn set_color_cmd(serialdev: &str, color: Color) {
     simple_cmd(serialdev, Command::SetColor, args);
 }
 
-fn ss_set_color_cmd(serialdev: &str, color: SSColor) {
-    let args = match color {
-        SSColor::White => &[0xFF, 0xFF, 0xFF],
-        SSColor::Black => &[0x00, 0x00, 0x00],
-        SSColor::Red => &[0xFF, 0x00, 0x00],
-        SSColor::Green => &[0x00, 0xFF, 0x00],
-        SSColor::Blue => &[0x00, 0x00, 0xFF],
-        SSColor::Yellow => &[0xFF, 0xFF, 0x00],
-        SSColor::Cyan => &[0x00, 0xFF, 0xFF],
-        SSColor::Purple => &[0xFF, 0x00, 0xFF],
-    };
-    simple_cmd(serialdev, Command::SetColor, args);
+fn ss_set_color_cmd(serialdev: &str, color: &Vec<SSColor>) {
+    let mut args = Vec::new();
+    for c in color {
+        let color_bytes = match c {
+            SSColor::White => &[0xFF, 0xFF, 0xFF],
+            SSColor::Black => &[0x00, 0x00, 0x00],
+            SSColor::Red => &[0xFF, 0x00, 0x00],
+            SSColor::Green => &[0x00, 0xFF, 0x00],
+            SSColor::Blue => &[0x00, 0x00, 0xFF],
+            SSColor::Yellow => &[0xFF, 0xFF, 0x00],
+            SSColor::Cyan => &[0x00, 0xFF, 0xFF],
+            SSColor::Purple => &[0xFF, 0x00, 0xFF],
+        };
+        args.extend(color_bytes);
+    }
+    simple_cmd(serialdev, Command::SetColor, &args);
 }
 
 fn gif_cmd(serialdev: &str, image_path: &str) {

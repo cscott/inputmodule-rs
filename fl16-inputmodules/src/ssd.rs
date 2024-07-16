@@ -32,8 +32,8 @@ pub struct SevenSegmentState {
     pub animate: bool,
     /// LED brightness out of 255
     pub brightness: u8,
-    /// Neopixel color
-    pub color: RGB8,
+    /// Neopixel colors
+    pub color: [RGB8; 5],
     /// Current sleep state
     pub sleeping: SleepState,
     pub animation_period: u64,

@@ -173,7 +173,7 @@ fn main() -> ! {
         col_buffer: Grid::default(),
         animate: false,
         brightness: 255,      // Default to 255/255 = 100% brightness
-        color: colors::GREEN, // XXX will probably want to tweak this
+        color: [colors::BLACK; 5],
         sleeping: SleepState::Awake,
         animation_period: 31_250, // 31,250 us = 32 FPS
         pwm_freq: PwmFreqArg::P29k,
@@ -229,7 +229,7 @@ fn main() -> ! {
 
     ws2812
         .write(smart_leds::brightness(
-            [state.color].iter().cloned(),
+            state.color.iter().cloned(),
             state.brightness,
         ))
         .unwrap();
@@ -538,9 +538,12 @@ fn handle_sleep(
             } else {
                 // Turn LED controller off to save power
                 led_enable.set_low().unwrap();
+                // XXX turn off neopixel power
             }
 
             // TODO: Set up SLEEP# pin as interrupt and wfi
+            // XXX CSA, yeah, should do that.
+            // XXX can also set timer interrupt and/or USB interrupt?
             //cortex_m::asm::wfi();
         }
         // Already sleeping and new sleep reason => just keep sleeping
@@ -562,11 +565,14 @@ fn handle_sleep(
             if !debug_mode(state) {
                 led_enable.set_high().unwrap();
             }
+            // XXX turn on and initialize neopixels
 
             // Slowly increase brightness
             if dyn_sleep_mode(state) == SleepMode::Fading {
                 let mut brightness = 0;
                 loop {
+                    // XXX should probably delay *after* setting the initial
+                    // brightness, not *before*?
                     delay.delay_ms(100);
                     brightness = if brightness >= old_brightness - 5 {
                         old_brightness
